@@ -1,4 +1,4 @@
-# Makefile for Assignment 5, creates the executables for the three programs
+#Makefile for Assignment 5, creates the executables for the three programs
 # TwoPipesTwoChildren, TwoPipesThreeChildren, and DynPipe. Also includes a
 # clean target to remove the executables and a package target to create a zip file for submission.
 # @Name: Diego Rodrigues Rodriguez
@@ -9,12 +9,12 @@
 CC = g++
 CCFLAGS = -Wall -g
 OBJS = TwoPipesTwoChildren.o TwoPipesThreeChildren.o DynPipe.o
-PRGMS = twopipes threepipes dynpipe 
+PRGMS = twochildren threechildren dynpipe 
 SUBMIT = assign5-diegorr-cs3377.zip
 
 $(PRGMS): $(OBJS)
-	$(CC) $(CCFLAGS) -o threepipes TwoPipesTwoChildren.o
-	$(CC) $(CCFLAGS) -o twopipes TwoPipesThreeChildren.o
+	$(CC) $(CCFLAGS) -o twochildren TwoPipesTwoChildren.o
+	$(CC) $(CCFLAGS) -o threechildren TwoPipesThreeChildren.o
 	$(CC) $(CCFLAGS) -o dynpipe DynPipe.o
 
 TwoPipesTwoChildren.o: TwoPipesTwoChildren.cpp
