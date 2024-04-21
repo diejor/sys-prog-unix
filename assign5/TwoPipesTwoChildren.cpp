@@ -30,7 +30,7 @@ void print_args(char **args) {
  * Expand the command into an array of strings
  * @param cmd: the command to expand
  */
-void expand_cmd(char** cmd) {
+void expand_command(char** cmd) {
     int size = sizeof(cmd);
     char* token = strtok(cmd[0], " ");
     token = strtok(NULL, " ");
@@ -48,7 +48,7 @@ void expand_cmd(char** cmd) {
  * Parse the commands from the user input
  * @param raw_commands: a single c-string containing the commands separated by "|"
  */
-void parse_cmds(char* raw_commands, char** first_cmd, char** second_cmd, char** third_cmd) {
+void parse_commands(char* raw_commands, char** first_cmd, char** second_cmd, char** third_cmd) {
     char* token = strtok(raw_commands, "|");
     int i = 0;
     while (token != NULL) {
@@ -63,9 +63,9 @@ void parse_cmds(char* raw_commands, char** first_cmd, char** second_cmd, char** 
         i++;
     }
 
-    expand_cmd(first_cmd);
-    expand_cmd(second_cmd);
-    expand_cmd(third_cmd);
+    expand_command(first_cmd);
+    expand_command(second_cmd);
+    expand_command(third_cmd);
 }
 
 /*
@@ -104,8 +104,7 @@ int run_command(char** cmd, int* pipe_in_fd, int* pipe_out_fd) {
  * @param second_cmd: the second command to run
  * @param third_cmd: the third command to run
  */
-void decide_commands(char** args, char** first_cmd, char** second_cmd, char** third_cmd) {
-    int size = sizeof(args);
+void decide_commands(int size, char** args, char** first_cmd, char** second_cmd, char** third_cmd) {
     if (size == 1) {
         cout << "** Using default arguments **" << endl;
         cout << "\t ls -ltr | grep 3376 | wc -l" << endl;
@@ -115,7 +114,7 @@ void decide_commands(char** args, char** first_cmd, char** second_cmd, char** th
     } else {
         cout << "** Using custom commands **" << endl;
         cout << "\t" << args[1] << endl;
-        parse_cmds(args[1], first_cmd, second_cmd, third_cmd);
+        parse_commands(args[1], first_cmd, second_cmd, third_cmd);
     }
 }
 
@@ -126,17 +125,13 @@ int main(int argc, char** argv) {
     char* second_cmd[8] = {"grep", "3376", NULL};
     char* third_cmd[8] = {"wc", "-l", NULL};
 
-    decide_commands(argv, first_cmd, second_cmd, third_cmd);
+    decide_commands(argc, argv, first_cmd, second_cmd, third_cmd);
 
     char** cmds[] = {first_cmd, second_cmd, third_cmd};
 
     // BODY OF ASSIGNMENT
-    int first_pipefd[2];
-    pipe(first_pipefd);
-    int first_child = fork();
-
     /*
-     * Strcuture of the program:
+     * Structure of the program:
      *            P
      *            |
      *          fork()
@@ -153,6 +148,9 @@ int main(int argc, char** argv) {
      *  P       C2      C1
      */
 
+    int first_pipefd[2];
+    pipe(first_pipefd);
+    int first_child = fork();
 
     if (first_child == 0) {
         run_command(third_cmd, first_pipefd, NULL);
@@ -162,7 +160,7 @@ int main(int argc, char** argv) {
         int second_child = fork();
 
         if (second_child == 0) {
-            run_command(second_cmd, second_pipefd, first_pipefd);
+            run_command(second_cmd, second_pipefd, first_pipefd);    
         } else { 
             run_command(first_cmd, NULL, second_pipefd);
         }
