@@ -1,5 +1,7 @@
 #include <iostream>
 #include <cstring>
+#include <vector>
+#include <algorithm>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
@@ -7,7 +9,8 @@
 #include <arpa/inet.h>
 
 #define MAX 1024
-#define PORT 8080
+
+using namespace std;
 
 void handle_tcp(int sockfd) {
     char buff[MAX];
@@ -17,19 +20,18 @@ void handle_tcp(int sockfd) {
 
     int connfd = accept(sockfd, (struct sockaddr*)&cli, &clilen);
     if (connfd < 0) {
-        std::cerr << "Server: accept failed" << std::endl;
+        cerr << "Server: accept failed" << endl;
         return;
     }
 
-    std::cout << "TCP connection established with client: " << inet_ntoa(cli.sin_addr) << ":" << ntohs(cli.sin_port) << std::endl;
+    cout << "TCP connection established with client: " << inet_ntoa(cli.sin_addr) << ":" << ntohs(cli.sin_port) << endl;
 
     while ((n = recv(connfd, buff, sizeof(buff), 0)) > 0) {
-        std::cout << "Received message: " << buff << std::endl;
+        cout << "Received message: " << buff << endl;
         send(connfd, buff, n, 0);  // Echo back the received message
-        std::cout << "Echoed back message to TCP client" << std::endl;
     }
 
-    std::cout << "TCP client disconnected" << std::endl;
+    cout << "TCP client disconnected" << endl;
     close(connfd);
 }
 
@@ -41,79 +43,88 @@ void handle_udp(int sockfd) {
 
     n = recvfrom(sockfd, buff, sizeof(buff), 0, (struct sockaddr*)&cli, &clilen);
     if (n > 0) {
-        std::cout << "UDP datagram received from " << inet_ntoa(cli.sin_addr) << ":" << ntohs(cli.sin_port) << std::endl;
-        std::cout << "Received message: " << buff << std::endl;
+        cout << "UDP datagram received from " << inet_ntoa(cli.sin_addr) << ":" << ntohs(cli.sin_port) << endl;
+        cout << "Received message: " << buff << endl;
         sendto(sockfd, buff, n, 0, (struct sockaddr*)&cli, clilen);  // Echo back the received message
-        std::cout << "Echoed back message to UDP client" << std::endl;
     }
 }
 
-int main() {
-    int tcpfd, udpfd, nready, maxfdp1;
+int create_socket(int port, bool is_tcp) {
+    int sockfd = socket(AF_INET, is_tcp ? SOCK_STREAM : SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        perror("Socket creation failed");
+        exit(EXIT_FAILURE);
+    }
+
     struct sockaddr_in servaddr;
-    fd_set rset;
-
-    // Create TCP socket
-    tcpfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (tcpfd == -1) {
-        perror("TCP socket creation failed");
-        exit(EXIT_FAILURE);
-    } else {
-        std::cout << "TCP socket created successfully" << std::endl;
-    }
-
-    // Create UDP socket
-    udpfd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (udpfd == -1) {
-        perror("UDP socket creation failed");
-        exit(EXIT_FAILURE);
-    } else {
-        std::cout << "UDP socket created successfully" << std::endl;
-    }
-
     memset(&servaddr, 0, sizeof(servaddr));
     servaddr.sin_family = AF_INET;
     servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-    servaddr.sin_port = htons(PORT);
+    servaddr.sin_port = htons(port);
 
-    // Bind TCP socket
-    if (bind(tcpfd, (struct sockaddr*)&servaddr, sizeof(servaddr)) != 0) {
-        perror("TCP bind failed");
+    if (bind(sockfd, (struct sockaddr*)&servaddr, sizeof(servaddr)) < 0) {
+        perror("Bind failed");
         exit(EXIT_FAILURE);
-    } else {
-        std::cout << "TCP socket bound to port " << PORT << std::endl;
-        listen(tcpfd, 5);
-        std::cout << "TCP socket listening" << std::endl;
     }
 
-    // Bind UDP socket
-    if (bind(udpfd, (struct sockaddr*)&servaddr, sizeof(servaddr)) != 0) {
-        perror("UDP bind failed");
-        exit(EXIT_FAILURE);
-    } else {
-        std::cout << "UDP socket bound to port " << PORT << std::endl;
+    if (is_tcp) {
+        if (listen(sockfd, 5) < 0) {
+            perror("Listen failed");
+            exit(EXIT_FAILURE);
+        }
     }
 
-    FD_ZERO(&rset);
-    maxfdp1 = (tcpfd > udpfd ? tcpfd : udpfd) + 1;
+    return sockfd;
+}
 
-    while (1) {
-        FD_SET(tcpfd, &rset);
-        FD_SET(udpfd, &rset);
+int main(int argc, char* argv[]) {
+    if (argc < 2 || argc > 4) {
+        cerr << "Usage: " << argv[0] << " <port1> [<port2> <port3>]" << endl;
+        exit(EXIT_FAILURE);
+    }
 
-        nready = select(maxfdp1, &rset, NULL, NULL, NULL);
+    vector<int> ports;
+    for (int i = 1; i < argc; ++i) {
+        ports.push_back(stoi(argv[i]));
+    }
 
+    vector<int> tcpfds, udpfds;
+    fd_set rset;
+    int maxfdp1 = 0;
+
+    for (int port : ports) {
+        int tcpfd = create_socket(port, true);
+        int udpfd = create_socket(port, false);
+        tcpfds.push_back(tcpfd);
+        udpfds.push_back(udpfd);
+        maxfdp1 = max({maxfdp1, tcpfd, udpfd});
+    }
+    maxfdp1 += 1;
+
+    while (true) {
+        FD_ZERO(&rset);
+        for (int tcpfd : tcpfds) {
+            FD_SET(tcpfd, &rset);
+        }
+        for (int udpfd : udpfds) {
+            FD_SET(udpfd, &rset);
+        }
+
+        int nready = select(maxfdp1, &rset, NULL, NULL, NULL);
         if (nready < 0) {
             perror("Select error");
             continue;
         }
 
-        if (FD_ISSET(tcpfd, &rset)) {
-            handle_tcp(tcpfd);
+        for (int tcpfd : tcpfds) {
+            if (FD_ISSET(tcpfd, &rset)) {
+                handle_tcp(tcpfd);
+            }
         }
-
-        if (FD_ISSET(udpfd, &rset)) {
-            handle_udp(udpfd);
+        for (int udpfd : udpfds) {
+            if (FD_ISSET(udpfd, &rset)) {
+                handle_udp(udpfd);
+            }
         }
     }
 
