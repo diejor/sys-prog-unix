@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <sys/select.h>
 #include <arpa/inet.h>
+#include <signal.h>
 
 #define MAX 1024
 
@@ -24,15 +25,21 @@ void handle_tcp(int sockfd) {
         return;
     }
 
-    cout << "TCP connection established with client: " << inet_ntoa(cli.sin_addr) << ":" << ntohs(cli.sin_port) << endl;
+    pid_t pid = fork();
+    if (pid == 0) { // Child process
+        close(sockfd); // Close the listening socket in the child process
+        cout << "TCP connection established with client: " << inet_ntoa(cli.sin_addr) << ":" << ntohs(cli.sin_port) << endl;
 
-    while ((n = recv(connfd, buff, sizeof(buff), 0)) > 0) {
-        cout << "Received message: " << buff << endl;
-        send(connfd, buff, n, 0);  // Echo back the received message
+        while ((n = recv(connfd, buff, sizeof(buff), 0)) > 0) {
+            cout << "Received message: " << buff << endl;
+            send(connfd, buff, n, 0);  // Echo back the received message
+        }
+
+        cout << "TCP client disconnected" << endl;
+        close(connfd);
+        exit(0);  // Terminate the child process
     }
-
-    cout << "TCP client disconnected" << endl;
-    close(connfd);
+    close(connfd); // Close the connected socket in the parent process
 }
 
 void handle_udp(int sockfd) {
@@ -43,9 +50,14 @@ void handle_udp(int sockfd) {
 
     n = recvfrom(sockfd, buff, sizeof(buff), 0, (struct sockaddr*)&cli, &clilen);
     if (n > 0) {
-        cout << "UDP datagram received from " << inet_ntoa(cli.sin_addr) << ":" << ntohs(cli.sin_port) << endl;
-        cout << "Received message: " << buff << endl;
-        sendto(sockfd, buff, n, 0, (struct sockaddr*)&cli, clilen);  // Echo back the received message
+        pid_t pid = fork();
+        if (pid == 0) {  // Child process
+            cout << "UDP datagram received from " << inet_ntoa(cli.sin_addr) << ":" << ntohs(cli.sin_port) << endl;
+            cout << "Received message: " << buff << endl;
+            sendto(sockfd, buff, n, 0, (struct sockaddr*)&cli, clilen);  // Echo back the received message
+            cout << "Echoed back message to UDP client" << endl;
+            exit(0); // Terminate the child process
+        }
     }
 }
 
@@ -100,6 +112,8 @@ int main(int argc, char* argv[]) {
         maxfdp1 = max({maxfdp1, tcpfd, udpfd});
     }
     maxfdp1 += 1;
+
+    signal(SIGCHLD, SIG_IGN); // Ignore SIGCHLD to prevent zombie processes
 
     while (true) {
         FD_ZERO(&rset);
