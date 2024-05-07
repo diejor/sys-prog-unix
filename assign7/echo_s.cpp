@@ -1,96 +1,122 @@
-#include <stdio.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <stdlib.h>
-#include <string.h>
+#include <iostream>
+#include <cstring>
 #include <sys/socket.h>
-#include <sys/types.h>
+#include <netinet/in.h>
 #include <unistd.h>
-#define MAX 80
-#define PORT 8080
-#define SA struct sockaddr
+#include <sys/select.h>
+#include <arpa/inet.h>
 
-// Function designed to echo messages back to the client.
-void echo_func(int connfd)
-{
+#define MAX 1024
+#define PORT 8080
+
+void handle_tcp(int sockfd) {
     char buff[MAX];
     int n;
-    // Infinite loop for handling client communication
-    while (1) {
-        bzero(buff, MAX);
+    struct sockaddr_in cli;
+    socklen_t clilen = sizeof(cli);
 
-        // Read the message from client and copy it into the buffer
-        n = recv(connfd, buff, sizeof(buff), 0);
-        if (n <= 0) {
-            printf("Read error or connection closed by client\n");
-            break; // Break the loop if client closes the connection or error occurs
-        }
-        
-        // Print buffer which contains the client contents
-        printf("From client: %s", buff);
+    int connfd = accept(sockfd, (struct sockaddr*)&cli, &clilen);
+    if (connfd < 0) {
+        std::cerr << "Server: accept failed" << std::endl;
+        return;
+    }
 
-        // Send that buffer back to client
-        send(connfd, buff, n, 0);
+    std::cout << "TCP connection established with client: " << inet_ntoa(cli.sin_addr) << ":" << ntohs(cli.sin_port) << std::endl;
+
+    while ((n = recv(connfd, buff, sizeof(buff), 0)) > 0) {
+        std::cout << "Received message: " << buff << std::endl;
+        send(connfd, buff, n, 0);  // Echo back the received message
+        std::cout << "Echoed back message to TCP client" << std::endl;
+    }
+
+    std::cout << "TCP client disconnected" << std::endl;
+    close(connfd);
+}
+
+void handle_udp(int sockfd) {
+    char buff[MAX];
+    int n;
+    struct sockaddr_in cli;
+    socklen_t clilen = sizeof(cli);
+
+    n = recvfrom(sockfd, buff, sizeof(buff), 0, (struct sockaddr*)&cli, &clilen);
+    if (n > 0) {
+        std::cout << "UDP datagram received from " << inet_ntoa(cli.sin_addr) << ":" << ntohs(cli.sin_port) << std::endl;
+        std::cout << "Received message: " << buff << std::endl;
+        sendto(sockfd, buff, n, 0, (struct sockaddr*)&cli, clilen);  // Echo back the received message
+        std::cout << "Echoed back message to UDP client" << std::endl;
     }
 }
 
-// Driver function
-int main()
-{
-    int sockfd, connfd;
-    unsigned int len;
-    struct sockaddr_in servaddr, cli;
+int main() {
+    int tcpfd, udpfd, nready, maxfdp1;
+    struct sockaddr_in servaddr;
+    fd_set rset;
 
-    // Socket creation and verification
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd == -1) {
-        printf("Socket creation failed...\n");
-        exit(0);
+    // Create TCP socket
+    tcpfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (tcpfd == -1) {
+        perror("TCP socket creation failed");
+        exit(EXIT_FAILURE);
+    } else {
+        std::cout << "TCP socket created successfully" << std::endl;
     }
-    else
-        printf("Socket successfully created..\n");
-    bzero(&servaddr, sizeof(servaddr));
 
-    // Assign IP, PORT
+    // Create UDP socket
+    udpfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (udpfd == -1) {
+        perror("UDP socket creation failed");
+        exit(EXIT_FAILURE);
+    } else {
+        std::cout << "UDP socket created successfully" << std::endl;
+    }
+
+    memset(&servaddr, 0, sizeof(servaddr));
     servaddr.sin_family = AF_INET;
     servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
     servaddr.sin_port = htons(PORT);
 
-    // Binding newly created socket to given IP and verification
-    if ((bind(sockfd, (SA*)&servaddr, sizeof(servaddr))) != 0) {
-        printf("Socket bind failed...\n");
-        exit(0);
+    // Bind TCP socket
+    if (bind(tcpfd, (struct sockaddr*)&servaddr, sizeof(servaddr)) != 0) {
+        perror("TCP bind failed");
+        exit(EXIT_FAILURE);
+    } else {
+        std::cout << "TCP socket bound to port " << PORT << std::endl;
+        listen(tcpfd, 5);
+        std::cout << "TCP socket listening" << std::endl;
     }
-    else
-        printf("Socket successfully binded..\n");
 
-    // Server is ready to listen
-    if ((listen(sockfd, 5)) != 0) {
-        printf("Listen failed...\n");
-        exit(0);
+    // Bind UDP socket
+    if (bind(udpfd, (struct sockaddr*)&servaddr, sizeof(servaddr)) != 0) {
+        perror("UDP bind failed");
+        exit(EXIT_FAILURE);
+    } else {
+        std::cout << "UDP socket bound to port " << PORT << std::endl;
     }
-    else
-        printf("Server listening..\n");
-    len = sizeof(cli);
 
-    // Accept the data packet from client
+    FD_ZERO(&rset);
+    maxfdp1 = (tcpfd > udpfd ? tcpfd : udpfd) + 1;
+
     while (1) {
-        connfd = accept(sockfd, (SA*)&cli, &len);
-        if (connfd < 0) {
-            printf("Server accept failed...\n");
-            continue; // Continue to accept next connection
+        FD_SET(tcpfd, &rset);
+        FD_SET(udpfd, &rset);
+
+        nready = select(maxfdp1, &rset, NULL, NULL, NULL);
+
+        if (nready < 0) {
+            perror("Select error");
+            continue;
         }
-        else
-            printf("Server accepted the client..\n");
 
-        // Function for echoing back to client
-        echo_func(connfd);
+        if (FD_ISSET(tcpfd, &rset)) {
+            handle_tcp(tcpfd);
+        }
 
-        // Close the client socket after echoing
-        close(connfd);
+        if (FD_ISSET(udpfd, &rset)) {
+            handle_udp(udpfd);
+        }
     }
 
-    // After chatting close the server socket
-    close(sockfd);
+    return 0;
 }
+
